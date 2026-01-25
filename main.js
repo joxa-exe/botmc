@@ -2,7 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const { createMinecraftBot, checkUserLimit } = require('./qoshish.js');
 const { initAdmin } = require('./admin.js');
 const { DDoSAttack } = require('./ddos.js');
-const { saveUser, getUserBots, removeBot, getSettings, isPremium, isAdmin, addBot } = require('./database.js');
+const { saveUser, getUserBots, removeBot, getSettings, isPremium, isAdmin } = require('./database.js');
 
 const TELEGRAM_TOKEN = '8362458059:AAFW9YaKexmKqieZMlv8XPdWqHFS2sqM_AA';
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -38,14 +38,15 @@ const cancelKeyboard = {
 const versionKeyboard = {
   keyboard: [
     ['1.21.50', '1.20.80'],
-    ['1.19.83','1.17.40', 'Auto'],
+    ['1.19.83', 'Auto'],
     ['🚫 Bekor qilish']
   ],
   resize_keyboard: true,
   one_time_keyboard: true
 };
 
-// Start
+// ================== START ==================
+
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -73,7 +74,7 @@ bot.onText(/\/start/, (msg) => {
   } else {
     bot.sendMessage(chatId, 
       `Salom ${username}!\n\n` +
-      `Oddiy foydalanuvchi: 3 ta bot\n` +
+      `Oddiy foydalanuvchi: 1 ta bot\n` +
       `Premium: ${settings.premiumLimit} ta bot + DDoS\n\n` +
       `Bot qoshish uchun "➕ Bot qoshish" tugmasini bosing`,
       {
@@ -83,7 +84,8 @@ bot.onText(/\/start/, (msg) => {
   }
 });
 
-// Bot qoshish
+// ================== BOT QOSHISH ==================
+
 bot.onText(/➕ Bot qoshish/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -91,9 +93,12 @@ bot.onText(/➕ Bot qoshish/, (msg) => {
   
   const limitCheck = checkUserLimit(userId);
   const userBots = getUserBots(userId);
+  const isUserPremium = isPremium(userId);
+  const settings = getSettings();
+  const userLimit = isUserPremium ? settings.premiumLimit : settings.regularLimit;
   
   // Agar userda bot bor bo'lsa, uni o'chirishni taklif qilish
-  if (userBots.length > 0 && !isPremium(userId)) {
+  if (userBots.length > 0 && !isUserPremium) {
     const currentBot = userBots[0];
     
     const replaceKeyboard = {
@@ -115,33 +120,37 @@ bot.onText(/➕ Bot qoshish/, (msg) => {
         reply_markup: replaceKeyboard
       }
     ).then(() => {
-      bot.once('message', (response) => {
-        if (response.text === '✅ Ha, o\'chirib yangisini qoshish') {
-          // Eski botni o'chirish
-          removeBot(currentBot.id);
-          // Yangi bot qoshishni boshlash
-          userStates.set(chatId, { 
-            step: 'waiting_ip',
-            userId: userId,
-            username: username
-          });
+      const listener = (response) => {
+        if (response.chat.id === chatId && response.from.id === userId) {
+          bot.removeListener('message', listener);
           
-          bot.sendMessage(chatId, '🌐 Server IP kiriting:', {
-            reply_markup: cancelKeyboard
-          });
-        } else {
-          bot.sendMessage(chatId, '❌ Bekor qilindi.', {
-            reply_markup: mainKeyboard
-          });
+          if (response.text === '✅ Ha, o\'chirib yangisini qoshish') {
+            // Eski botni o'chirish
+            removeBot(currentBot.id);
+            // Yangi bot qoshishni boshlash
+            userStates.set(chatId, { 
+              step: 'waiting_ip',
+              userId: userId,
+              username: username
+            });
+            
+            bot.sendMessage(chatId, '🌐 Server IP kiriting:', {
+              reply_markup: cancelKeyboard
+            });
+          } else {
+            bot.sendMessage(chatId, '❌ Bekor qilindi.', {
+              reply_markup: mainKeyboard
+            });
+          }
         }
-      });
+      };
+      
+      bot.on('message', listener);
     });
   }
   
   // Premium userlar uchun oddiy limit tekshirish
-  if (isPremium(userId) && !limitCheck.canAdd) {
-    const settings = getSettings();
-    
+  if (isUserPremium && !limitCheck.canAdd) {
     return bot.sendMessage(chatId, 
       `❌ Premium limit: ${limitCheck.current}/${settings.premiumLimit} ta\n` +
       `Yangi bot qoshish uchun avval ba'zi botlarni o'chiring.`,
@@ -162,79 +171,301 @@ bot.onText(/➕ Bot qoshish/, (msg) => {
   });
 });
 
-// IP qabul qilish
+// ================== MESSAGE HANDLER ==================
+
 bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  const state = userStates.get(chatId);
-  
-  if (!state || text.startsWith('/')) return;
-  
-  if (state.step === 'waiting_ip') {
-    userStates.set(chatId, {
-      ...state,
-      step: 'waiting_port',
-      ip: text
-    });
+  try {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    const userId = msg.from?.id;
     
-    bot.sendMessage(chatId, '🔢 Port (odatiy 19132):', {
-      reply_markup: cancelKeyboard
-    });
-  }
-  
-  else if (state.step === 'waiting_port') {
-    const port = parseInt(text) || 19132;
-    userStates.set(chatId, {
-      ...state,
-      step: 'waiting_version',
-      port: port
-    });
+    // Asosiy tekshirishlar
+    if (!userId || !text || typeof text !== 'string') return;
     
-    bot.sendMessage(chatId, '📦 Versiya tanlang:', {
-      reply_markup: versionKeyboard
-    });
-  }
-  
-  else if (state.step === 'waiting_version') {
-    const version = text;
-    const { ip, port, userId, username } = state;
+    const state = userStates.get(chatId);
     
-    bot.sendMessage(chatId, `🔄 Bot ulanmoqda...`);
-    
-    try {
-      const serverData = { ip, port, version, userId, username };
-      const result = await createMinecraftBot(serverData);
+    // ===== BOT QOSHISH QADAMLARI =====
+    if (state && !text.startsWith('/')) {
+      if (state.step === 'waiting_ip') {
+        userStates.set(chatId, {
+          ...state,
+          step: 'waiting_port',
+          ip: text
+        });
+        
+        bot.sendMessage(chatId, '🔢 Port (odatiy 19132):', {
+          reply_markup: cancelKeyboard
+        });
+      }
       
-      const userBotsCount = getUserBots(userId).length;
-      const isUserPremium = isPremium(userId);
-      const settings = getSettings();
-      const userLimit = isUserPremium ? settings.premiumLimit : settings.regularLimit;
+      else if (state.step === 'waiting_port') {
+        const port = parseInt(text) || 19132;
+        userStates.set(chatId, {
+          ...state,
+          step: 'waiting_version',
+          port: port
+        });
+        
+        bot.sendMessage(chatId, '📦 Versiya tanlang:', {
+          reply_markup: versionKeyboard
+        });
+      }
       
-      bot.sendMessage(chatId, 
-        `✅ Bot qoshildi!\n\n` +
-        `🤖 ${result.botName}\n` +
-        `🌐 ${result.server}\n` +
-        `📦 ${result.version}\n` +
-        `📊 ${userBotsCount}/${userLimit} ta bot`,
-        {
-          reply_markup: isUserPremium ? premiumKeyboard : mainKeyboard
+      else if (state.step === 'waiting_version') {
+        const version = text;
+        const { ip, port, userId, username } = state;
+        
+        bot.sendMessage(chatId, `🔄 Bot ulanmoqda...`);
+        
+        try {
+          const serverData = { ip, port, version, userId, username };
+          const result = await createMinecraftBot(serverData);
+          
+          const userBotsCount = getUserBots(userId).length;
+          const isUserPremium = isPremium(userId);
+          const settings = getSettings();
+          const userLimit = isUserPremium ? settings.premiumLimit : settings.regularLimit;
+          
+          bot.sendMessage(chatId, 
+            `✅ Bot qoshildi!\n\n` +
+            `🤖 ${result.botName}\n` +
+            `🌐 ${result.server}\n` +
+            `📦 ${result.version}\n` +
+            `📊 ${userBotsCount}/${userLimit} ta bot`,
+            {
+              reply_markup: isUserPremium ? premiumKeyboard : mainKeyboard
+            }
+          );
+          
+          userStates.delete(chatId);
+          
+        } catch (error) {
+          bot.sendMessage(chatId, `❌ ${error.message}`, {
+            reply_markup: isPremium(userId) ? premiumKeyboard : mainKeyboard
+          });
+          userStates.delete(chatId);
         }
-      );
+      }
       
-      userStates.delete(chatId);
+      // ===== DDoS QADAMLARI =====
+      else if (state.step === 'ddos_ip') {
+        userStates.set(chatId, {
+          ...state,
+          step: 'ddos_port',
+          ddos_ip: text
+        });
+        
+        bot.sendMessage(chatId, '🔢 DDoS uchun port kiriting:', {
+          reply_markup: cancelKeyboard
+        });
+      }
       
-    } catch (error) {
-      bot.sendMessage(chatId, `❌ ${error.message}`, {
-        reply_markup: isPremium(userId) ? premiumKeyboard : mainKeyboard
-      });
-      userStates.delete(chatId);
+      else if (state.step === 'ddos_port') {
+        const port = parseInt(text) || 19132;
+        userStates.set(chatId, {
+          ...state,
+          step: 'ddos_version',
+          ddos_port: port
+        });
+        
+        bot.sendMessage(chatId, '📦 DDoS uchun versiya tanlang:', {
+          reply_markup: versionKeyboard
+        });
+      }
+      
+      else if (state.step === 'ddos_version') {
+        const version = text;
+        const ip = state.ddos_ip;
+        const port = state.ddos_port;
+        const userId = state.userId;
+        
+        if (!isPremium(userId)) {
+          userStates.delete(chatId);
+          return bot.sendMessage(chatId, '❌ Premium obuna kerak!');
+        }
+        
+        if (!ddosAttacks.has(userId)) {
+          ddosAttacks.set(userId, new DDoSAttack(userId));
+        }
+        
+        const attack = ddosAttacks.get(userId);
+        
+        bot.sendMessage(chatId, `⚡ DDoS boshlanmoqda... (5 ta bot)`);
+        
+        try {
+          const result = await attack.startAttack(ip, port, version, 5);
+          
+          bot.sendMessage(chatId, 
+            `⚡ DDoS BOSHLANDI!\n\n` +
+            `🌐 Target: ${ip}:${port}\n` +
+            `🤖 Botlar: 5 ta\n` +
+            `📦 Versiya: ${version}\n\n` +
+            `To'xtatish uchun "🛑 DDoS to'xtatish"`,
+            {
+              reply_markup: premiumKeyboard
+            }
+          );
+          
+        } catch (error) {
+          bot.sendMessage(chatId, `❌ ${error.message}`, {
+            reply_markup: premiumKeyboard
+          });
+        }
+        
+        userStates.delete(chatId);
+      }
     }
+    
+    // ===== QAYTA QOSHISH =====
+    else if (text.startsWith('🔄 ')) {
+      const botName = text.replace('🔄 ', '');
+      const userBots = getUserBots(userId);
+      const isUserPremium = isPremium(userId);
+      
+      const selectedBot = userBots.find(bot => bot.botName === botName);
+      
+      if (!selectedBot) {
+        return bot.sendMessage(chatId, '❌ Bot topilmadi.', {
+          reply_markup: isUserPremium ? premiumKeyboard : mainKeyboard
+        });
+      }
+      
+      // Oddiy foydalanuvchi uchun: eski botni o'chirib, yangisini qoshish
+      if (!isUserPremium) {
+        // Eski botni o'chirish
+        removeBot(selectedBot.id);
+        
+        // Server ma'lumotlarini olish
+        const [ip, port] = selectedBot.server.split(':');
+        const version = selectedBot.version;
+        const username = selectedBot.username;
+        
+        bot.sendMessage(chatId, `🔄 Yangi bot qoshilmoqda: ${selectedBot.server}`);
+        
+        try {
+          const serverData = { 
+            ip, 
+            port: parseInt(port), 
+            version, 
+            userId, 
+            username 
+          };
+          
+          const result = await createMinecraftBot(serverData);
+          
+          bot.sendMessage(chatId, 
+            `✅ Yangi bot qoshildi!\n\n` +
+            `🤖 ${result.botName}\n` +
+            `🌐 ${result.server}\n` +
+            `📦 ${result.version}`,
+            {
+              reply_markup: mainKeyboard
+            }
+          );
+          
+        } catch (error) {
+          bot.sendMessage(chatId, 
+            `❌ Qayta qoshishda xato:\n${error.message}`,
+            {
+              reply_markup: mainKeyboard
+            }
+          );
+        }
+      } 
+      // Premium foydalanuvchi uchun: faqat qayta qoshish
+      else {
+        const settings = getSettings();
+        const userBotsCount = getUserBots(userId).length;
+        
+        // Limit tekshirish (faqat premium uchun)
+        if (userBotsCount >= settings.premiumLimit) {
+          return bot.sendMessage(chatId, 
+            `❌ Premium limit: ${userBotsCount}/${settings.premiumLimit} ta\n` +
+            `Yangi bot qoshish uchun avval ba'zi botlarni o'chiring.`,
+            {
+              reply_markup: premiumKeyboard
+            }
+          );
+        }
+        
+        // Server ma'lumotlarini olish
+        const [ip, port] = selectedBot.server.split(':');
+        const version = selectedBot.version;
+        const username = selectedBot.username;
+        
+        bot.sendMessage(chatId, `🔄 Bot qayta qoshilmoqda: ${selectedBot.server}`);
+        
+        try {
+          const serverData = { 
+            ip, 
+            port: parseInt(port), 
+            version, 
+            userId, 
+            username 
+          };
+          
+          const result = await createMinecraftBot(serverData);
+          
+          const newCount = getUserBots(userId).length;
+          
+          bot.sendMessage(chatId, 
+            `✅ Yangi bot qoshildi!\n\n` +
+            `🤖 ${result.botName}\n` +
+            `🌐 ${result.server}\n` +
+            `📦 ${result.version}\n` +
+            `📊 ${newCount}/${settings.premiumLimit} ta bot`,
+            {
+              reply_markup: premiumKeyboard
+            }
+          );
+          
+        } catch (error) {
+          bot.sendMessage(chatId, 
+            `❌ Qayta qoshishda xato:\n${error.message}`,
+            {
+              reply_markup: premiumKeyboard
+            }
+          );
+        }
+      }
+    }
+    
+    // ===== BOT O'CHIRISH (PREMIUM) =====
+    else if (text.startsWith('🗑️ ')) {
+      const isUserPremium = isPremium(userId);
+      
+      if (!isUserPremium) {
+        return bot.sendMessage(chatId, '❌ Bot o\'chirish faqat Premium uchun!', {
+          reply_markup: mainKeyboard
+        });
+      }
+      
+      const botName = text.replace('🗑️ ', '');
+      const userBots = getUserBots(userId);
+      
+      const botToRemove = userBots.find(bot => bot.botName === botName);
+      
+      if (botToRemove && removeBot(botToRemove.id)) {
+        const settings = getSettings();
+        const remainingBots = getUserBots(userId).length;
+        
+        bot.sendMessage(chatId, 
+          `✅ "${botName}" ochirildi.\n` +
+          `📊 Qolgan botlar: ${remainingBots}/${settings.premiumLimit} ta`,
+          {
+            reply_markup: premiumKeyboard
+          }
+        );
+      }
+    }
+    
+  } catch (error) {
+    console.error('Message handler xatosi:', error);
   }
 });
 
 // ================== BOTLARIM ==================
 
-// Botlarim
 bot.onText(/📋 Mening botim|📋 Botlarim/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -305,153 +536,6 @@ bot.onText(/📋 Mening botim|📋 Botlarim/, (msg) => {
   });
 });
 
-// Qayta qoshish va o'chirish
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  const userId = msg.from.id;
-  const isUserPremium = isPremium(userId);
-  
-  if (text.startsWith('🔄 ')) {
-    const botName = text.replace('🔄 ', '');
-    const userBots = getUserBots(userId);
-    
-    const selectedBot = userBots.find(bot => bot.botName === botName);
-    
-    if (!selectedBot) {
-      return bot.sendMessage(chatId, '❌ Bot topilmadi.', {
-        reply_markup: isUserPremium ? premiumKeyboard : mainKeyboard
-      });
-    }
-    
-    // Oddiy foydalanuvchi uchun: eski botni o'chirib, yangisini qoshish
-    if (!isUserPremium) {
-      // Eski botni o'chirish
-      removeBot(selectedBot.id);
-      
-      // Server ma'lumotlarini olish
-      const [ip, port] = selectedBot.server.split(':');
-      const version = selectedBot.version;
-      const username = selectedBot.username;
-      
-      bot.sendMessage(chatId, `🔄 Yangi bot qoshilmoqda: ${selectedBot.server}`);
-      
-      try {
-        const serverData = { 
-          ip, 
-          port: parseInt(port), 
-          version, 
-          userId, 
-          username 
-        };
-        
-        const result = await createMinecraftBot(serverData);
-        
-        bot.sendMessage(chatId, 
-          `✅ Yangi bot qoshildi!\n\n` +
-          `🤖 ${result.botName}\n` +
-          `🌐 ${result.server}\n` +
-          `📦 ${result.version}`,
-          {
-            reply_markup: mainKeyboard
-          }
-        );
-        
-      } catch (error) {
-        bot.sendMessage(chatId, 
-          `❌ Qayta qoshishda xato:\n${error.message}`,
-          {
-            reply_markup: mainKeyboard
-          }
-        );
-      }
-    } 
-    // Premium foydalanuvchi uchun: faqat qayta qoshish (limit cheklamasiz)
-    else {
-      const settings = getSettings();
-      const userBotsCount = getUserBots(userId).length;
-      
-      // Limit tekshirish (faqat premium uchun)
-      if (userBotsCount >= settings.premiumLimit) {
-        return bot.sendMessage(chatId, 
-          `❌ Premium limit: ${userBotsCount}/${settings.premiumLimit} ta\n` +
-          `Yangi bot qoshish uchun avval ba'zi botlarni o'chiring.`,
-          {
-            reply_markup: premiumKeyboard
-          }
-        );
-      }
-      
-      // Server ma'lumotlarini olish
-      const [ip, port] = selectedBot.server.split(':');
-      const version = selectedBot.version;
-      const username = selectedBot.username;
-      
-      bot.sendMessage(chatId, `🔄 Bot qayta qoshilmoqda: ${selectedBot.server}`);
-      
-      try {
-        const serverData = { 
-          ip, 
-          port: parseInt(port), 
-          version, 
-          userId, 
-          username 
-        };
-        
-        const result = await createMinecraftBot(serverData);
-        
-        const newCount = getUserBots(userId).length;
-        
-        bot.sendMessage(chatId, 
-          `✅ Yangi bot qoshildi!\n\n` +
-          `🤖 ${result.botName}\n` +
-          `🌐 ${result.server}\n` +
-          `📦 ${result.version}\n` +
-          `📊 ${newCount}/${settings.premiumLimit} ta bot`,
-          {
-            reply_markup: premiumKeyboard
-          }
-        );
-        
-      } catch (error) {
-        bot.sendMessage(chatId, 
-          `❌ Qayta qoshishda xato:\n${error.message}`,
-          {
-            reply_markup: premiumKeyboard
-          }
-        );
-      }
-    }
-  }
-  
-  // Botni o'chirish (faqat premium)
-  else if (text.startsWith('🗑️ ')) {
-    if (!isUserPremium) {
-      return bot.sendMessage(chatId, '❌ Bot o\'chirish faqat Premium uchun!', {
-        reply_markup: mainKeyboard
-      });
-    }
-    
-    const botName = text.replace('🗑️ ', '');
-    const userBots = getUserBots(userId);
-    
-    const botToRemove = userBots.find(bot => bot.botName === botName);
-    
-    if (botToRemove && removeBot(botToRemove.id)) {
-      const settings = getSettings();
-      const remainingBots = getUserBots(userId).length;
-      
-      bot.sendMessage(chatId, 
-        `✅ "${botName}" ochirildi.\n` +
-        `📊 Qolgan botlar: ${remainingBots}/${settings.premiumLimit} ta`,
-        {
-          reply_markup: premiumKeyboard
-        }
-      );
-    }
-  }
-});
-
 // ================== DDoS BOSHLASH ==================
 
 bot.onText(/⚡ DDoS boshlash/, (msg) => {
@@ -478,82 +562,8 @@ bot.onText(/⚡ DDoS boshlash/, (msg) => {
   });
 });
 
-// DDoS IP qabul qilish
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  const state = userStates.get(chatId);
-  
-  if (!state || !state.step?.includes('ddos')) return;
-  
-  if (state.step === 'ddos_ip') {
-    userStates.set(chatId, {
-      ...state,
-      step: 'ddos_port',
-      ddos_ip: text
-    });
-    
-    bot.sendMessage(chatId, '🔢 DDoS uchun port kiriting:', {
-      reply_markup: cancelKeyboard
-    });
-  }
-  
-  else if (state.step === 'ddos_port') {
-    const port = parseInt(text) || 19132;
-    userStates.set(chatId, {
-      ...state,
-      step: 'ddos_version',
-      ddos_port: port
-    });
-    
-    bot.sendMessage(chatId, '📦 DDoS uchun versiya tanlang:', {
-      reply_markup: versionKeyboard
-    });
-  }
-  
-  else if (state.step === 'ddos_version') {
-    const version = text;
-    const ip = state.ddos_ip;
-    const port = state.ddos_port;
-    const userId = state.userId;
-    
-    if (!isPremium(userId)) {
-      return bot.sendMessage(chatId, '❌ Premium obuna kerak!');
-    }
-    
-    if (!ddosAttacks.has(userId)) {
-      ddosAttacks.set(userId, new DDoSAttack(userId));
-    }
-    
-    const attack = ddosAttacks.get(userId);
-    
-    bot.sendMessage(chatId, `⚡ DDoS boshlanmoqda... (5 ta bot)`);
-    
-    try {
-      const result = await attack.startAttack(ip, port, version, 5);
-      
-      bot.sendMessage(chatId, 
-        `⚡ DDoS BOSHLANDI!\n\n` +
-        `🌐 Target: ${ip}:${port}\n` +
-        `🤖 Botlar: 5 ta\n` +
-        `📦 Versiya: ${version}\n\n` +
-        `To'xtatish uchun "🛑 DDoS to'xtatish"`,
-        {
-          reply_markup: premiumKeyboard
-        }
-      );
-      
-    } catch (error) {
-      bot.sendMessage(chatId, `❌ ${error.message}`, {
-        reply_markup: premiumKeyboard
-      });
-    }
-    
-    userStates.delete(chatId);
-  }
-});
+// ================== DDoS TO'XTATISH ==================
 
-// DDoS to'xtatish
 bot.onText(/🛑 DDoS to\'xtatish/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -591,7 +601,8 @@ bot.onText(/🛑 DDoS to\'xtatish/, (msg) => {
   );
 });
 
-// Premium
+// ================== PREMIUM ==================
+
 bot.onText(/💎 Premium|💎 Premium holat/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -624,17 +635,18 @@ bot.onText(/💎 Premium|💎 Premium holat/, (msg) => {
   );
 });
 
-// Yordam
+// ================== YORDAM ==================
+
 bot.onText(/ℹ️ Yordam/, (msg) => {
   const chatId = msg.chat.id;
   
   bot.sendMessage(chatId, 
     `ℹ️ YORDAM\n\n` +
     `📌 *Oddiy foydalanuvchi:*\n` +
-    `• 1 ta bot\n` +
+    `• 3 ta bot\n` +
     `• Qayta qoshish (eski bot o'chiriladi)\n\n` +
     `💎 *Premium foydalanuvchi:*\n` +
-    `• 5 ta bot\n` +
+    `• ${getSettings().premiumLimit} ta bot\n` +
     `• Bot o'chirish\n` +
     `• DDoS hujum (5 bot)\n\n` +
     `🔧 *Qo'llanma:*\n` +
@@ -643,12 +655,14 @@ bot.onText(/ℹ️ Yordam/, (msg) => {
     `3. Versiya: 1.21.50\n` +
     `4. Admin: ${ADMIN_USERNAME}`,
     {
+      parse_mode: 'Markdown',
       reply_markup: mainKeyboard
     }
   );
 });
 
-// Bekor qilish
+// ================== BEKOR QILISH ==================
+
 bot.onText(/🚫 Bekor qilish/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -659,7 +673,8 @@ bot.onText(/🚫 Bekor qilish/, (msg) => {
   });
 });
 
-// Bosh menyu
+// ================== BOSH MENYU ==================
+
 bot.onText(/🏠 Bosh menyu/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -670,8 +685,11 @@ bot.onText(/🏠 Bosh menyu/, (msg) => {
   });
 });
 
-// Admin panel
+// ================== ADMIN PANEL ==================
+
 initAdmin(bot);
+
+// ================== XATOLIKLAR ==================
 
 bot.on('polling_error', (error) => {
   console.error('Polling error:', error);
