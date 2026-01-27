@@ -6,7 +6,7 @@ async function createMinecraftBot(serverData) {
     const { ip, port, version, userId, username } = serverData;
     
     const botNumber = (getUserBots(userId).length + 1);
-    const botName = `MCPE_${username}_${botNumber}`;
+    const botName = `@MCPEBotAdderBot_${botNumber}`;
     
     const botData = {
       id: Date.now().toString(),

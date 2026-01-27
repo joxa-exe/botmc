@@ -4,7 +4,7 @@ const { initAdmin } = require('./admin.js');
 const { DDoSAttack } = require('./ddos.js');
 const { saveUser, getUserBots, removeBot, getSettings, isPremium, isAdmin } = require('./database.js');
 
-const TELEGRAM_TOKEN = '6513975219:AAG7KNdUuoGO4lppNbqO_m-y9OQL8AOcu6k';
+const TELEGRAM_TOKEN = '8362458059:AAFW9YaKexmKqieZMlv8XPdWqHFS2sqM_AA';
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 const ADMIN_USERNAME = '@crpytouzb';
 

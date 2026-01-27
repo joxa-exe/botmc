@@ -11,6 +11,7 @@
   "description": "",
   "dependencies": {
     "bedrock-protocol": "^3.52.0",
-    "node-telegram-bot-api": "^0.67.0"
+    "node-telegram-bot-api": "^0.67.0",
+    "telegram-bot-api": "^2.0.1"
   }
 }
