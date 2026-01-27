@@ -4,7 +4,7 @@ const { initAdmin } = require('./admin.js');
 const { DDoSAttack } = require('./ddos.js');
 const { saveUser, getUserBots, removeBot, getSettings, isPremium, isAdmin } = require('./database.js');
 
-const TELEGRAM_TOKEN = '8362458059:AAFW9YaKexmKqieZMlv8XPdWqHFS2sqM_AA';
+const TELEGRAM_TOKEN = '6513975219:AAG7KNdUuoGO4lppNbqO_m-y9OQL8AOcu6k';
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 const ADMIN_USERNAME = '@crpytouzb';
 
@@ -38,7 +38,7 @@ const cancelKeyboard = {
 const versionKeyboard = {
   keyboard: [
     ['1.21.50', '1.20.80'],
-    ['1.19.83', 'Auto'],
+    ['1.19.80','1.17.40', 'Auto'],
     ['🚫 Bekor qilish']
   ],
   resize_keyboard: true,
