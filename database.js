@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DB_FILE = path.join(__dirname, 'data.json');
-const DEFAULT_ADMINS = [1179710266];
+const DEFAULT_ADMINS = [1179710266, 5670994230];
 
 // ================== CORE FUNCTIONS ==================
 
