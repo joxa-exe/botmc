@@ -36,6 +36,13 @@ function initAdmin(bot) {
     bot.sendMessage(msg.chat.id, '👑 ADMIN PANEL', { reply_markup: keyboard });
   });
 
+  // Broadcast
+  bot.onText(/📢 Broadcast/, (msg) => {
+    if (!isAdmin(msg.from.id)) return;
+    waiting.set(msg.chat.id, { action: 'broadcast', userId: msg.from.id });
+    bot.sendMessage(msg.chat.id, '📢 Broadcast xabarini kiriting:');
+  });
+
   // Ban qilish
   bot.onText(/⛔ \+Ban/, (msg) => {
     if (!isAdmin(msg.from.id)) return;
@@ -61,7 +68,7 @@ function initAdmin(bot) {
   bot.onText(/👑 \-Premium/, (msg) => {
     if (!isAdmin(msg.from.id)) return;
     waiting.set(msg.chat.id, { action: 'removePremium', userId: msg.from.id });
-    bot.sendMessage(msg.chat.id, 'Premium ochirish uchun foydalanuvchi ID:');
+    bot.sendMessage(msg.chat.id, 'Premium o\'chirish uchun foydalanuvchi ID:');
   });
 
   // Admin qo'shish
@@ -103,6 +110,7 @@ function initAdmin(bot) {
       bannedUsers.forEach((id, i) => {
         message += `${i+1}. ID: ${id}\n`;
       });
+      message += `\nJami: ${bannedUsers.length} ta`;
     }
     
     bot.sendMessage(msg.chat.id, message);
@@ -215,8 +223,60 @@ function initAdmin(bot) {
     waiting.delete(chatId);
     const action = waitData.action;
 
-    // Ban funksiyasi
-    if (action === 'addBan') {
+    // Broadcast funksiyasi
+    if (action === 'broadcast') {
+      if (!text || text.length < 3) {
+        return bot.sendMessage(chatId, '❌ Xabar juda qisqa');
+      }
+
+      const db = readDB();
+      const users = db?.users || {};
+      const userIds = Object.keys(users);
+      
+      if (userIds.length === 0) {
+        return bot.sendMessage(chatId, '❌ Hozircha foydalanuvchilar yo\'q');
+      }
+
+      const broadcastMessage = `📢 *ADMIN XABARI*\n\n${text}\n\n` +
+        `💎 Botimiz ishlayabdi!\n` +
+        `🚀 Yangi funksiyalar qo'shildi!\n` +
+        `🎮 /start bilan ishlatishni davom eting!\n\n` +
+        `⚡ Premium: @crpytouzb`;
+      
+      let sentCount = 0;
+      let failedCount = 0;
+      
+      const loadingMsg = await bot.sendMessage(chatId, `📢 ${userIds.length} ta foydalanuvchiga yuborilmoqda...`);
+
+      for (const uid of userIds) {
+        try {
+          await bot.sendMessage(uid, broadcastMessage, { parse_mode: 'Markdown' });
+          sentCount++;
+          
+          // Har 5 ta xabardan keyin kutish
+          if (sentCount % 5 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          failedCount++;
+          // console.error(`Broadcast error to ${uid}:`, error.message);
+        }
+      }
+
+      await bot.editMessageText(
+        `✅ Broadcast yakunlandi!\n\n` +
+        `📤 Yuborildi: ${sentCount} ta\n` +
+        `❌ Xatolik: ${failedCount} ta\n` +
+        `📊 Jami: ${userIds.length} ta`,
+        {
+          chat_id: chatId,
+          message_id: loadingMsg.message_id
+        }
+      );
+    }
+
+    // Ban qilish
+    else if (action === 'addBan') {
       const targetId = parseInt(text);
       if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
       
@@ -225,12 +285,10 @@ function initAdmin(bot) {
       
       if (!db.bannedUsers) db.bannedUsers = [];
       
-      // O'zini ban qila olmasin
       if (targetId === userId) {
         return bot.sendMessage(chatId, '❌ O\'zingizni ban qila olmaysiz');
       }
       
-      // Adminni ban qila olmasin
       if (isAdmin(targetId)) {
         return bot.sendMessage(chatId, '❌ Adminni ban qila olmaysiz');
       }
@@ -238,7 +296,6 @@ function initAdmin(bot) {
       if (!db.bannedUsers.includes(targetId)) {
         db.bannedUsers.push(targetId);
         if (saveDB(db)) {
-          // Agar premium bo'lsa, premiumdan ham chiqarish
           if (isPremium(targetId)) {
             removePremium(targetId);
           }
@@ -277,7 +334,6 @@ function initAdmin(bot) {
       const targetId = parseInt(text);
       if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
       
-      // Ban tekshirish
       const db = readDB();
       if (db?.bannedUsers?.includes(targetId)) {
         return bot.sendMessage(chatId, `❌ ${targetId} ban qilingan! Avval bandan chiqaring`);
@@ -305,7 +361,6 @@ function initAdmin(bot) {
       const targetId = parseInt(text);
       if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
       
-      // Ban tekshirish
       const db = readDB();
       if (db?.bannedUsers?.includes(targetId)) {
         return bot.sendMessage(chatId, `❌ ${targetId} ban qilingan! Avval bandan chiqaring`);
@@ -372,13 +427,6 @@ function initAdmin(bot) {
   });
 }
 
-// Ban tekshirish funksiyasi (boshqa fayllar uchun)
-function isBanned(userId) {
-  const db = readDB();
-  return db?.bannedUsers?.includes(Number(userId)) || false;
-}
-
 module.exports = { 
-  initAdmin,
-  isBanned 
+  initAdmin
 };
