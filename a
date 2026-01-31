@@ -10,8 +10,7 @@ const {
   getAllAdmins,
   addAdmin,
   removeAdmin,
-  readDB,
-  saveDB
+  readDB
 } = require('./database.js');
 
 function initAdmin(bot) {
@@ -25,7 +24,6 @@ function initAdmin(bot) {
       keyboard: [
         ['👑 +Premium', '👑 -Premium'],
         ['👥 +Admin', '👥 -Admin'],
-        ['⛔ +Ban', '✅ -Ban'],
         ['📊 Premiumlar', '🤖 Botlar'],
         ['📢 Broadcast', '📈 Statistika'],
         ['⚙️ Sozlamalar', '🏠 Menyu']
@@ -36,18 +34,11 @@ function initAdmin(bot) {
     bot.sendMessage(msg.chat.id, '👑 ADMIN PANEL', { reply_markup: keyboard });
   });
 
-  // Ban qilish
-  bot.onText(/⛔ \+Ban/, (msg) => {
+  // Broadcast qo'shish
+  bot.onText(/📢 Broadcast/, (msg) => {
     if (!isAdmin(msg.from.id)) return;
-    waiting.set(msg.chat.id, { action: 'addBan', userId: msg.from.id });
-    bot.sendMessage(msg.chat.id, 'Ban qilish uchun foydalanuvchi ID:');
-  });
-
-  // Bandan chiqarish
-  bot.onText(/✅ -Ban/, (msg) => {
-    if (!isAdmin(msg.from.id)) return;
-    waiting.set(msg.chat.id, { action: 'removeBan', userId: msg.from.id });
-    bot.sendMessage(msg.chat.id, 'Bandan chiqarish uchun foydalanuvchi ID:');
+    waiting.set(msg.chat.id, { action: 'broadcast', userId: msg.from.id });
+    bot.sendMessage(msg.chat.id, '📢 Broadcast xabarini kiriting:');
   });
 
   // Premium qo'shish
@@ -61,7 +52,7 @@ function initAdmin(bot) {
   bot.onText(/👑 \-Premium/, (msg) => {
     if (!isAdmin(msg.from.id)) return;
     waiting.set(msg.chat.id, { action: 'removePremium', userId: msg.from.id });
-    bot.sendMessage(msg.chat.id, 'Premium ochirish uchun foydalanuvchi ID:');
+    bot.sendMessage(msg.chat.id, 'Premium o\'chirish uchun foydalanuvchi ID:');
   });
 
   // Admin qo'shish
@@ -82,27 +73,16 @@ function initAdmin(bot) {
   bot.onText(/📊 Premiumlar/, async (msg) => {
     if (!isAdmin(msg.from.id)) return;
     
-    const db = readDB();
     const premiumUsers = getAllPremium();
-    const bannedUsers = db?.bannedUsers || [];
-    
     let message = '👑 Premium foydalanuvchilar:\n\n';
     
     if (premiumUsers.length === 0) {
-      message += '❌ Premium foydalanuvchilar yo\'q\n';
+      message = '❌ Premium foydalanuvchilar yo\'q';
     } else {
       premiumUsers.forEach((id, i) => {
-        const isBanned = bannedUsers.includes(id) ? ' ⛔' : '';
-        message += `${i+1}. ID: ${id}${isBanned}\n`;
-      });
-      message += `\nJami: ${premiumUsers.length} ta`;
-    }
-    
-    if (bannedUsers.length > 0) {
-      message += '\n\n⛔ Ban qilinganlar:\n';
-      bannedUsers.forEach((id, i) => {
         message += `${i+1}. ID: ${id}\n`;
       });
+      message += `\nJami: ${premiumUsers.length} ta`;
     }
     
     bot.sendMessage(msg.chat.id, message);
@@ -186,7 +166,6 @@ function initAdmin(bot) {
     const botCount = getAllBots().length;
     const adminCount = getAllAdmins().length;
     const userCount = db?.users ? Object.keys(db.users).length : 0;
-    const bannedCount = db?.bannedUsers ? db.bannedUsers.length : 0;
     const settings = getSettings();
     
     bot.sendMessage(msg.chat.id,
@@ -195,7 +174,6 @@ function initAdmin(bot) {
       `👑 Premiumlar: ${premiumCount} ta\n` +
       `🤖 Botlar: ${botCount} ta\n` +
       `👥 Adminlar: ${adminCount} ta\n` +
-      `⛔ Ban qilinganlar: ${bannedCount} ta\n` +
       `💰 Narx: ${settings.premiumPrice} so'm\n` +
       `📅 ${new Date().toLocaleString('uz-UZ')}`
     );
@@ -215,73 +193,62 @@ function initAdmin(bot) {
     waiting.delete(chatId);
     const action = waitData.action;
 
-    // Ban funksiyasi
-    if (action === 'addBan') {
-      const targetId = parseInt(text);
-      if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
-      
-      const db = readDB();
-      if (!db) return bot.sendMessage(chatId, '❌ DB xatosi');
-      
-      if (!db.bannedUsers) db.bannedUsers = [];
-      
-      // O'zini ban qila olmasin
-      if (targetId === userId) {
-        return bot.sendMessage(chatId, '❌ O\'zingizni ban qila olmaysiz');
+    // Broadcast funksiyasi
+    if (action === 'broadcast') {
+      if (!text || text.length < 3) {
+        return bot.sendMessage(chatId, '❌ Xabar juda qisqa');
       }
-      
-      // Adminni ban qila olmasin
-      if (isAdmin(targetId)) {
-        return bot.sendMessage(chatId, '❌ Adminni ban qila olmaysiz');
-      }
-      
-      if (!db.bannedUsers.includes(targetId)) {
-        db.bannedUsers.push(targetId);
-        if (saveDB(db)) {
-          // Agar premium bo'lsa, premiumdan ham chiqarish
-          if (isPremium(targetId)) {
-            removePremium(targetId);
-          }
-          
-          bot.sendMessage(chatId, `⛔ ${targetId} ban qilindi!\n\n✅ Premiumdan ham chiqarildi`);
-        } else {
-          bot.sendMessage(chatId, '❌ DB saqlashda xato');
-        }
-      } else {
-        bot.sendMessage(chatId, `ℹ️ ${targetId} allaqachon ban qilingan`);
-      }
-    }
 
-    // Bandan chiqarish
-    else if (action === 'removeBan') {
-      const targetId = parseInt(text);
-      if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
-      
       const db = readDB();
-      if (!db?.bannedUsers) return bot.sendMessage(chatId, '❌ Banlar ro\'yxati yo\'q');
+      const users = db?.users || {};
+      const userIds = Object.keys(users);
       
-      const index = db.bannedUsers.indexOf(targetId);
-      if (index > -1) {
-        db.bannedUsers.splice(index, 1);
-        if (saveDB(db)) {
-          bot.sendMessage(chatId, `✅ ${targetId} bandan chiqarildi`);
-        } else {
-          bot.sendMessage(chatId, '❌ DB saqlashda xato');
-        }
-      } else {
-        bot.sendMessage(chatId, `ℹ️ ${targetId} ban qilinmagan`);
+      if (userIds.length === 0) {
+        return bot.sendMessage(chatId, '❌ Hozircha foydalanuvchilar yo\'q');
       }
+
+      const broadcastMessage = `📢 *ADMIN XABARI*\n\n${text}\n\n` +
+        `💎 Botimiz ishlayabdi!\n` +
+        `🚀 Yangi funksiyalar qo'shildi!\n` +
+        `🎮 /start bilan ishlatishni davom eting!\n\n` +
+        `⚡ Premium: @crpytouzb`;
+      
+      let sentCount = 0;
+      let failedCount = 0;
+      
+      // Xabarni yuborish
+      const loadingMsg = await bot.sendMessage(chatId, `📢 ${userIds.length} ta foydalanuvchiga yuborilmoqda...`);
+
+      for (const uid of userIds) {
+        try {
+          await bot.sendMessage(uid, broadcastMessage, { parse_mode: 'Markdown' });
+          sentCount++;
+          
+          // Har 10 ta xabardan keyin kutish
+          if (sentCount % 10 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          failedCount++;
+          console.error(`Broadcast error to ${uid}:`, error.message);
+        }
+      }
+
+      await bot.editMessageText(
+        `✅ Broadcast yakunlandi!\n\n` +
+        `📤 Yuborildi: ${sentCount} ta\n` +
+        `❌ Xatolik: ${failedCount} ta\n` +
+        `📊 Jami: ${userIds.length} ta`,
+        {
+          chat_id: chatId,
+          message_id: loadingMsg.message_id
+        }
+      );
     }
 
     else if (action === 'addPremium') {
       const targetId = parseInt(text);
       if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
-      
-      // Ban tekshirish
-      const db = readDB();
-      if (db?.bannedUsers?.includes(targetId)) {
-        return bot.sendMessage(chatId, `❌ ${targetId} ban qilingan! Avval bandan chiqaring`);
-      }
       
       if (addPremium(targetId)) {
         bot.sendMessage(chatId, `✅ ${targetId} Premium qo'shildi`);
@@ -304,12 +271,6 @@ function initAdmin(bot) {
     else if (action === 'addAdmin') {
       const targetId = parseInt(text);
       if (isNaN(targetId)) return bot.sendMessage(chatId, '❌ Noto\'g\'ri ID');
-      
-      // Ban tekshirish
-      const db = readDB();
-      if (db?.bannedUsers?.includes(targetId)) {
-        return bot.sendMessage(chatId, `❌ ${targetId} ban qilingan! Avval bandan chiqaring`);
-      }
       
       if (addAdmin(targetId)) {
         bot.sendMessage(chatId, `✅ ${targetId} Admin qo'shildi`);
@@ -372,13 +333,4 @@ function initAdmin(bot) {
   });
 }
 
-// Ban tekshirish funksiyasi (boshqa fayllar uchun)
-function isBanned(userId) {
-  const db = readDB();
-  return db?.bannedUsers?.includes(Number(userId)) || false;
-}
-
-module.exports = { 
-  initAdmin,
-  isBanned 
-};
+module.exports = { initAdmin };

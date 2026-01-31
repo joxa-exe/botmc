@@ -1,348 +1,324 @@
 const TelegramBot = require('node-telegram-bot-api');
-const { createMinecraftBot } = require('./qoshish.js');
+const { createMinecraftBot, stopUserBots, stopBot } = require('./qoshish.js');
 const { initAdmin } = require('./admin.js');
 const { DDoSAttack } = require('./ddos.js');
-const { saveUser, getUserBots, removeBot, getSettings, isPremium } = require('./database.js');
+const { saveUser, getUserBots, getSettings, isPremium, removeBot } = require('./database.js');
 
-const TELEGRAM_TOKEN = '8362458059:AAFW9YaKexmKqieZMlv8XPdWqHFS2sqM_AA';
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+const bot = new TelegramBot('6513975219:AAGYkY2pFPGyttgOKKWaCLrGwL43aT6IbHw', { 
+    polling: true,
+    request: { timeout: 30000 }
+});
+
 const userStates = new Map();
 const ddosAttacks = new Map();
 
+// Keyboardlar
 const keyboards = {
-  main: {
-    keyboard: [['➕ Bot qoshish'], ['📋 Botlarim'], ['💎 Premium', 'ℹ️ Yordam']],
-    resize_keyboard: true
-  },
-  premium: {
-    keyboard: [
-      ['➕ Bot qoshish'],
-      ['📋 Botlarim'],
-      ['💎 Premium holat', '⚡ DDoS boshlash'],
-      ['🛑 DDoS to\'xtatish', '🏠 Bosh menyu']
-    ],
-    resize_keyboard: true
-  },
-  cancel: {
-    keyboard: [['🚫 Bekor qilish']],
-    resize_keyboard: true
-  },
-  version: {
-    keyboard: [['1.21.50', '1.20.80'], ['1.19.80', '1.17.40', 'Auto'], ['🚫 Bekor qilish']],
-    resize_keyboard: true,
-    one_time_keyboard: true
-  }
+    main: { keyboard: [['➕ Bot'], ['📋 Botlarim'], ['💎 Premium', 'ℹ️ Yordam']], resize_keyboard: true },
+    premium: { keyboard: [['➕ Bot'], ['📋 Botlarim'], ['💎 Premium', '⚡ DDoS'], ['🛑 DDoS', '🛑 To\'xtatish'], ['🏠 Menyu']], resize_keyboard: true },
+    cancel: { keyboard: [['🚫 Bekor']], resize_keyboard: true },
+    version: { keyboard: [['1.21.50', '1.20.80'], ['1.19.80', '1.17.40', 'Auto'], ['🚫 Bekor']], resize_keyboard: true }
 };
 
 function getUserKeyboard(userId) {
-  return isPremium(userId) ? keyboards.premium : keyboards.main;
+    return isPremium(userId) ? keyboards.premium : keyboards.main;
 }
 
 function formatBotInfo(botData) {
-  const timeAgo = Math.floor((Date.now() - new Date(botData.createdAt)) / 60000);
-  const hours = Math.floor(timeAgo / 60);
-  const minutes = timeAgo % 60;
-  const timeStr = hours > 0 ? `${hours} soat ${minutes} daqiqa` : `${minutes} daqiqa`;
-  
-  return `🤖 ${botData.botName}\n🌐 ${botData.server}\n📦 ${botData.version}\n⏰ ${timeStr}`;
+    const time = Math.floor((Date.now() - new Date(botData.createdAt)) / 60000);
+    const hours = Math.floor(time / 60);
+    const minutes = time % 60;
+    return `🤖 ${botData.botName}\n🌐 ${botData.server}\n📦 ${botData.version}\n⏰ ${hours > 0 ? hours + ' soat ' : ''}${minutes} daqiqa`;
 }
 
-// ================== START HANDLER ==================
+// Start
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const username = msg.from.username ? '@' + msg.from.username : msg.from.first_name;
-
-  saveUser(userId, {
-    username: username,
-    firstName: msg.from.first_name,
-    firstSeen: new Date().toISOString()
-  });
-
-  const settings = getSettings();
-  const isUserPremium = isPremium(userId);
-  
-  const message = isUserPremium 
-    ? `💎 PREMIUM\n\nSalom ${username}!\nLimit: ${settings.premiumLimit} ta bot\nDDoS imkoniyati mavjud`
-    : `Salom ${username}!\n\nOddiy foydalanuvchi: 1 ta bot\nPremium: ${settings.premiumLimit} ta bot + DDoS\n\nBot qoshish uchun "➕ Bot qoshish" tugmasini bosing`;
-
-  bot.sendMessage(chatId, message, { reply_markup: getUserKeyboard(userId) });
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const username = msg.from.username || msg.from.first_name;
+    
+    saveUser(userId, { username, firstName: msg.from.first_name, firstSeen: new Date().toISOString() });
+    
+    const premium = isPremium(userId);
+    const settings = getSettings();
+    
+    let text = `👋 ${username}!\n`;
+    text += premium ? `💎 Premium\nLimit: ${settings.premiumLimit} bot\nDDoS: ✅` 
+                   : `📱 Oddiy\nLimit: 1 bot\nPremium: ${settings.premiumPrice} so'm`;
+    
+    bot.sendMessage(chatId, text, { reply_markup: getUserKeyboard(userId) });
 });
 
-// ================== BOT QOSHISH ==================
-bot.onText(/➕ Bot qoshish/, async (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const userBots = getUserBots(userId);
-  const isUserPremium = isPremium(userId);
-  const settings = getSettings();
-  const limit = isUserPremium ? settings.premiumLimit : 1;
-
-  // Limit tekshirish
-  if (userBots.length >= limit) {
-    if (!isUserPremium) {
-      // Oddiy foydalanuvchi: eskisini almashtirish
-      const currentBot = userBots[0];
-      const replaceMsg = await bot.sendMessage(
-        chatId,
-        `ℹ️ Sizda allaqachon bot bor:\n${formatBotInfo(currentBot)}\n\nYangi bot qoshish uchun avvalgi bot o'chiriladi. Davom ettirishni xohlaysizmi?`,
-        {
-          reply_markup: {
-            keyboard: [['✅ Ha, o\'chirib yangisini qoshish'], ['❌ Yo\'q, bekor qilish']],
-            resize_keyboard: true,
-            one_time_keyboard: true
-          }
-        }
-      );
-
-      bot.once('message', (response) => {
-        if (response.chat.id === chatId && response.text === '✅ Ha, o\'chirib yangisini qoshish') {
-          removeBot(currentBot.id);
-          startBotCreation(chatId, userId);
+// Bot qo'shish
+bot.onText(/➕ Bot/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    const userBots = getUserBots(userId);
+    const premium = isPremium(userId);
+    const limit = premium ? getSettings().premiumLimit : 1;
+    
+    if (userBots.length >= limit) {
+        if (!premium) {
+            // Oddiy foydalanuvchi: eski botni o'chirish
+            removeBot(userBots[0].id);
         } else {
-          bot.sendMessage(chatId, '❌ Bekor qilindi.', { reply_markup: getUserKeyboard(userId) });
+            return bot.sendMessage(chatId, `❌ Limit: ${userBots.length}/${limit}`, { 
+                reply_markup: getUserKeyboard(userId) 
+            });
         }
-      });
-      return;
-    } else {
-      return bot.sendMessage(chatId, `❌ Limit: ${userBots.length}/${limit} ta\nYangi bot qoshish uchun avval ba'zi botlarni o'chiring.`);
     }
-  }
-
-  startBotCreation(chatId, userId);
+    
+    userStates.set(chatId, { step: 'ip', userId });
+    bot.sendMessage(chatId, '🌐 IP kiriting:', { reply_markup: keyboards.cancel });
 });
 
-function startBotCreation(chatId, userId) {
-  userStates.set(chatId, { step: 'waiting_ip', userId });
-  bot.sendMessage(chatId, '🌐 Server IP kiriting:', { reply_markup: keyboards.cancel });
-}
-
-// ================== MESSAGE HANDLER ==================
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  const userId = msg.from?.id;
-  if (!userId || !text || text.startsWith('/')) return;
-
-  const state = userStates.get(chatId);
-  if (!state) return;
-
-  try {
-    // Bot qoshish jarayoni
-    if (state.step === 'waiting_ip') {
-      userStates.set(chatId, { ...state, step: 'waiting_port', ip: text });
-      bot.sendMessage(chatId, '🔢 Port (odatiy 19132):', { reply_markup: keyboards.cancel });
-    } 
-    else if (state.step === 'waiting_port') {
-      const port = parseInt(text) || 19132;
-      userStates.set(chatId, { ...state, step: 'waiting_version', port });
-      bot.sendMessage(chatId, '📦 Versiya tanlang:', { reply_markup: keyboards.version });
-    } 
-    else if (state.step === 'waiting_version') {
-      const { ip, port, userId } = state;
-      await bot.sendMessage(chatId, `🔄 Bot ulanmoqda...`);
-      
-      const result = await createMinecraftBot({ ip, port, version: text, userId });
-      const userBots = getUserBots(userId);
-      const isUserPremium = isPremium(userId);
-      const limit = isUserPremium ? getSettings().premiumLimit : 1;
-
-      bot.sendMessage(
-        chatId,
-        `✅ Bot qoshildi!\n\n${formatBotInfo(result)}\n📊 ${userBots.length}/${limit} ta bot`,
-        { reply_markup: getUserKeyboard(userId) }
-      );
-      userStates.delete(chatId);
-    }
-
-    // DDoS jarayoni
-    else if (state.step === 'ddos_ip') {
-      userStates.set(chatId, { ...state, step: 'ddos_port', ddos_ip: text });
-      bot.sendMessage(chatId, '🔢 DDoS uchun port kiriting:', { reply_markup: keyboards.cancel });
-    } 
-    else if (state.step === 'ddos_port') {
-      userStates.set(chatId, { ...state, step: 'ddos_version', ddos_port: parseInt(text) || 19132 });
-      bot.sendMessage(chatId, '📦 DDoS uchun versiya tanlang:', { reply_markup: keyboards.version });
-    } 
-    else if (state.step === 'ddos_version') {
-      if (!isPremium(userId)) {
-        userStates.delete(chatId);
-        return bot.sendMessage(chatId, '❌ Premium obuna kerak!');
-      }
-
-      const { ddos_ip: ip, ddos_port: port } = state;
-      if (!ddosAttacks.has(userId)) ddosAttacks.set(userId, new DDoSAttack(userId));
-
-      await bot.sendMessage(chatId, `⚡ DDoS boshlanmoqda... (5 ta bot)`);
-      const result = await ddosAttacks.get(userId).startAttack(ip, port, text, 5);
-
-      bot.sendMessage(
-        chatId,
-        `⚡ DDoS BOSHLANDI!\n\n🌐 Target: ${ip}:${port}\n🤖 Botlar: 5 ta\n📦 Versiya: ${text}\n\nTo'xtatish uchun "🛑 DDoS to'xtatish"`,
-        { reply_markup: keyboards.premium }
-      );
-      userStates.delete(chatId);
-    }
-  } catch (error) {
-    bot.sendMessage(chatId, `❌ ${error.message}`, { reply_markup: getUserKeyboard(userId) });
-    userStates.delete(chatId);
-  }
-});
-
-// ================== BOTLARIM ==================
+// Botlarim
 bot.onText(/📋 Botlarim/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const userBots = getUserBots(userId);
-  const isUserPremium = isPremium(userId);
-  const limit = isUserPremium ? getSettings().premiumLimit : 1;
-
-  if (userBots.length === 0) {
-    return bot.sendMessage(
-      chatId,
-      `Sizda hozircha bot yo'q.\nBot qoshish uchun "➕ Bot qoshish" tugmasini bosing.`,
-      { reply_markup: getUserKeyboard(userId) }
-    );
-  }
-
-  let message = `📋 Botlaringiz (${userBots.length}/${limit}):\n\n`;
-  const keyboard = { keyboard: [], resize_keyboard: true };
-
-  userBots.forEach(bot => {
-    message += `${formatBotInfo(bot)}\n\n`;
-    
-    if (isUserPremium) {
-      keyboard.keyboard.push([`🔄 ${bot.botName}`, `🗑️ ${bot.botName}`]);
-    } else {
-      keyboard.keyboard.push([`🔄 ${bot.botName}`]);
-    }
-  });
-
-  message += isUserPremium ? `🔄 - Qayta qoshish\n🗑️ - Botni o'chirish` : `🔄 - O'chirib yangi bot qoshish`;
-  keyboard.keyboard.push(['🏠 Bosh menyu']);
-
-  bot.sendMessage(chatId, message, { reply_markup: keyboard });
-});
-
-// ================== DDoS FUNCTIONS ==================
-bot.onText(/⚡ DDoS boshlash/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-
-  if (!isPremium(userId)) {
-    return bot.sendMessage(chatId, '❌ DDoS faqat Premium uchun!', { reply_markup: keyboards.main });
-  }
-
-  userStates.set(chatId, { step: 'ddos_ip', userId });
-  bot.sendMessage(chatId, '🌐 DDoS uchun server IP kiriting:', { reply_markup: keyboards.cancel });
-});
-
-bot.onText(/🛑 DDoS to\'xtatish/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const attack = ddosAttacks.get(userId);
-
-  if (!attack) return bot.sendMessage(chatId, '❌ Faol DDoS hujum yo\'q', { reply_markup: keyboards.premium });
-  
-  const result = attack.stopAllAttacks();
-  bot.sendMessage(chatId, `✅ DDoS TO'XTATILDI\n\n🛑 ${result.stoppedBots} ta bot o'chirildi`, { reply_markup: keyboards.premium });
-});
-
-// ================== QAYTA QOSHISH VA O'CHIRISH ==================
-bot.on('message', async (msg) => {
-  const text = msg.text;
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  
-  if (text.startsWith('🔄 ')) {
-    const botName = text.replace('🔄 ', '');
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
     const userBots = getUserBots(userId);
-    const botToRecreate = userBots.find(b => b.botName === botName);
     
-    if (!botToRecreate) return bot.sendMessage(chatId, '❌ Bot topilmadi.', { reply_markup: getUserKeyboard(userId) });
-
-    // Oddiy foydalanuvchi: eskisini o'chirish
-    if (!isPremium(userId)) removeBot(botToRecreate.id);
-
-    const [ip, port] = botToRecreate.server.split(':');
-    await bot.sendMessage(chatId, `🔄 Yangi bot qoshilmoqda...`);
-
-    try {
-      const result = await createMinecraftBot({
-        ip,
-        port: parseInt(port),
-        version: botToRecreate.version,
-        userId
-      });
-
-      bot.sendMessage(chatId, `✅ Yangi bot qoshildi!\n\n${formatBotInfo(result)}`, {
-        reply_markup: getUserKeyboard(userId)
-      });
-    } catch (error) {
-      bot.sendMessage(chatId, `❌ ${error.message}`, { reply_markup: getUserKeyboard(userId) });
+    if (userBots.length === 0) {
+        return bot.sendMessage(chatId, '❌ Bot yo\'q', { reply_markup: getUserKeyboard(userId) });
     }
-  }
-
-  if (text.startsWith('🗑️ ')) {
-    if (!isPremium(userId)) return bot.sendMessage(chatId, '❌ Bot o\'chirish faqat Premium uchun!');
     
-    const botName = text.replace('🗑️ ', '');
-    const userBots = getUserBots(userId);
-    const botToRemove = userBots.find(b => b.botName === botName);
+    let text = `📋 Botlar (${userBots.length}):\n\n`;
+    const kb = { keyboard: [], resize_keyboard: true };
     
-    if (botToRemove && removeBot(botToRemove.id)) {
-      const remaining = getUserBots(userId).length;
-      bot.sendMessage(chatId, `✅ "${botName}" o'chirildi.\n📊 Qolgan botlar: ${remaining} ta`, {
-        reply_markup: keyboards.premium
-      });
-    }
-  }
+    userBots.forEach(bot => {
+        text += formatBotInfo(bot) + '\n\n';
+        kb.keyboard.push([`🛑 ${bot.botName}`]);
+    });
+    
+    kb.keyboard.push(['🏠 Menyu']);
+    bot.sendMessage(chatId, text, { reply_markup: kb });
 });
 
-// ================== QOLGAN HANDLERLAR ==================
+// Premium
 bot.onText(/💎 Premium/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const settings = getSettings();
-
-  if (isPremium(userId)) {
-    const userBots = getUserBots(userId);
-    bot.sendMessage(chatId, `💎 SIZ PREMIUM OBUNACHISIZ!\n\nLimit: ${settings.premiumLimit} ta bot\nDDoS imkoniyati mavjud\nJoriy botlar: ${userBots.length} ta`, {
-      reply_markup: keyboards.premium
-    });
-  } else {
-    bot.sendMessage(chatId, `💎 PREMIUM OBUNA\n\nNarxi: ${settings.premiumPrice} so'm\nLimit: ${settings.premiumLimit} ta bot\nDDoS imkoniyati (5 ta bot)\n\nSotib olish uchun: @crpytouzb`, {
-      reply_markup: keyboards.main
-    });
-  }
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const settings = getSettings();
+    
+    if (isPremium(userId)) {
+        const userBots = getUserBots(userId);
+        bot.sendMessage(chatId, `💎 SIZ PREMIUM\nLimit: ${settings.premiumLimit} bot\nJoriy: ${userBots.length} bot\nDDoS: ✅`, { 
+            reply_markup: keyboards.premium 
+        });
+    } else {
+        bot.sendMessage(chatId, `💎 Premium: ${settings.premiumPrice} so'm\nLimit: ${settings.premiumLimit} bot\nDDoS: 10 bot\n\nSotib olish: @crpytouzb`, { 
+            reply_markup: keyboards.main 
+        });
+    }
 });
 
+// Yordam
 bot.onText(/ℹ️ Yordam/, (msg) => {
-  const settings = getSettings();
-  bot.sendMessage(msg.chat.id, 
-    `ℹ️ YORDAM\n\n` +
-    `📌 *Oddiy foydalanuvchi:*\n• 1 ta bot\n• Qayta qoshish (eski bot o'chiriladi)\n\n` +
-    `💎 *Premium:*\n• ${settings.premiumLimit} ta bot\n• Bot o'chirish\n• DDoS hujum (5 bot)\n\n` +
-    `🔧 *Qo'llanma:*\n1. IP: play.example.com\n2. Port: 19132\n3. Versiya: 1.21.50\n4. Admin: @crpytouzb`,
-    { parse_mode: 'Markdown', reply_markup: keyboards.main }
-  );
+    const settings = getSettings();
+    bot.sendMessage(msg.chat.id, 
+        `ℹ️ YORDAM\n\n📱 Oddiy: 1 bot\n💎 Premium: ${settings.premiumLimit} bot + DDoS\n\n1. IP kiriting\n2. Port kiriting\n3. Versiya tanlang\n\nAdmin: @crpytouzb`,
+        { reply_markup: keyboards.main }
+    );
 });
 
-bot.onText(/🚫 Bekor qilish/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  userStates.delete(chatId);
-  bot.sendMessage(chatId, '❌ Bekor qilindi.', { reply_markup: getUserKeyboard(userId) });
+// Message handler
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    const userId = msg.from?.id;
+    if (!userId || !text || text.startsWith('/')) return;
+    
+    const state = userStates.get(chatId);
+    if (!state) return;
+    
+    try {
+        // Bot qo'shish - IP
+        if (state.step === 'ip') {
+            if (text === '🚫 Bekor') {
+                userStates.delete(chatId);
+                return bot.sendMessage(chatId, '❌ Bekor', { reply_markup: getUserKeyboard(userId) });
+            }
+            
+            const ip = text.trim();
+            if (!ip) return bot.sendMessage(chatId, '❌ IP kiriting:', { reply_markup: keyboards.cancel });
+            
+            userStates.set(chatId, { step: 'port', userId, ip });
+            bot.sendMessage(chatId, '🔢 Port (19132):', { reply_markup: keyboards.cancel });
+        }
+        // Bot qo'shish - Port
+        else if (state.step === 'port') {
+            if (text === '🚫 Bekor') {
+                userStates.delete(chatId);
+                return bot.sendMessage(chatId, '❌ Bekor', { reply_markup: getUserKeyboard(userId) });
+            }
+            
+            let port = parseInt(text);
+            if (isNaN(port)) port = 19132;
+            
+            userStates.set(chatId, { step: 'version', userId, ip: state.ip, port });
+            bot.sendMessage(chatId, '📦 Versiya:', { reply_markup: keyboards.version });
+        }
+        // Bot qo'shish - Versiya
+        else if (state.step === 'version') {
+            if (text === '🚫 Bekor') {
+                userStates.delete(chatId);
+                return bot.sendMessage(chatId, '❌ Bekor', { reply_markup: getUserKeyboard(userId) });
+            }
+            
+            const { ip, port } = state;
+            const loading = await bot.sendMessage(chatId, `🔄 Bot ulanmoqda...`);
+            
+            try {
+                const result = await createMinecraftBot({ ip, port, version: text, userId });
+                const userBots = getUserBots(userId);
+                const premium = isPremium(userId);
+                const limit = premium ? getSettings().premiumLimit : 1;
+                
+                await bot.editMessageText(`✅ Bot qo'shildi!\n\n${formatBotInfo(result)}\n📊 ${userBots.length}/${limit}`, {
+                    chat_id: chatId,
+                    message_id: loading.message_id
+                });
+                
+                userStates.delete(chatId);
+            } catch (error) {
+                await bot.editMessageText(`❌ ${error.message}`, {
+                    chat_id: chatId,
+                    message_id: loading.message_id
+                });
+                userStates.delete(chatId);
+            }
+        }
+    } catch (error) {
+        console.error('Xato:', error.message);
+        userStates.delete(chatId);
+        bot.sendMessage(chatId, '❌ Xatolik', { reply_markup: getUserKeyboard(userId) });
+    }
 });
 
-bot.onText(/🏠 Bosh menyu/, (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  userStates.delete(chatId);
-  bot.sendMessage(chatId, '🏠 Bosh menyu:', { reply_markup: getUserKeyboard(userId) });
+// Botni to'xtatish
+bot.on('message', async (msg) => {
+    const text = msg.text;
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!text?.startsWith('🛑 ') || text === '🛑 DDoS' || text === '🛑 To\'xtatish') return;
+    
+    const botName = text.replace('🛑 ', '');
+    const userBots = getUserBots(userId);
+    const botToStop = userBots.find(b => b.botName === botName);
+    
+    if (!botToStop) return;
+    
+    // Faqat Premium foydalanuvchilar botlarni to'xtata oladi
+    if (!isPremium(userId)) {
+        return bot.sendMessage(chatId, '❌ Faqat Premium uchun!\n💎 Yangi bot qo\'shganda avvalgisi o\'chiriladi', { 
+            reply_markup: keyboards.main 
+        });
+    }
+    
+    const loading = await bot.sendMessage(chatId, `🛑 ${botName} to'xtatilmoqda...`);
+    
+    try {
+        const result = await stopBot(botToStop.id);
+        await bot.editMessageText(result.message, {
+            chat_id: chatId,
+            message_id: loading.message_id
+        });
+    } catch (error) {
+        await bot.editMessageText(`❌ ${error.message}`, {
+            chat_id: chatId,
+            message_id: loading.message_id
+        });
+    }
 });
 
-// ================== ADMIN PANEL ==================
+// DDoS boshlash
+bot.onText(/⚡ DDoS/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isPremium(userId)) {
+        return bot.sendMessage(chatId, '❌ Premium kerak', { reply_markup: keyboards.main });
+    }
+    
+    userStates.set(chatId, { step: 'ddos_ip', userId });
+    bot.sendMessage(chatId, '🌐 DDoS IP:', { reply_markup: keyboards.cancel });
+});
+
+// DDoS to'xtatish
+bot.onText(/🛑 DDoS/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isPremium(userId)) {
+        return bot.sendMessage(chatId, '❌ Premium kerak', { reply_markup: keyboards.main });
+    }
+    
+    if (!ddosAttacks.has(userId)) {
+        return bot.sendMessage(chatId, '❌ DDoS yo\'q', { reply_markup: keyboards.premium });
+    }
+    
+    try {
+        const result = ddosAttacks.get(userId).stopAllAttacks();
+        ddosAttacks.delete(userId);
+        bot.sendMessage(chatId, `✅ DDoS to'xtatildi\n${result.stoppedBots} bot`, { reply_markup: keyboards.premium });
+    } catch (error) {
+        bot.sendMessage(chatId, '❌ Xatolik', { reply_markup: keyboards.premium });
+    }
+});
+
+// Botlarni to'xtatish (Premium uchun)
+bot.onText(/🛑 To\'xtatish/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isPremium(userId)) {
+        return bot.sendMessage(chatId, '❌ Premium kerak', { reply_markup: keyboards.main });
+    }
+    
+    const userBots = getUserBots(userId);
+    if (userBots.length === 0) {
+        return bot.sendMessage(chatId, '❌ Bot yo\'q', { reply_markup: keyboards.premium });
+    }
+    
+    const loading = await bot.sendMessage(chatId, `🛑 ${userBots.length} bot to'xtatilmoqda...`);
+    
+    try {
+        const result = await stopUserBots(userId);
+        await bot.editMessageText(result.message, {
+            chat_id: chatId,
+            message_id: loading.message_id
+        });
+    } catch (error) {
+        await bot.editMessageText(`❌ ${error.message}`, {
+            chat_id: chatId,
+            message_id: loading.message_id
+        });
+    }
+});
+
+// Menyu va Bekor
+bot.onText(/🏠 Menyu/, (msg) => {
+    userStates.delete(msg.chat.id);
+    bot.sendMessage(msg.chat.id, '🏠 Menyu', { reply_markup: getUserKeyboard(msg.from.id) });
+});
+
+bot.onText(/🚫 Bekor/, (msg) => {
+    userStates.delete(msg.chat.id);
+    bot.sendMessage(msg.chat.id, '❌ Bekor', { reply_markup: getUserKeyboard(msg.from.id) });
+});
+
+// Admin panel
 initAdmin(bot);
 
-console.log('🤖 Bot ishga tushdi...');
+console.log('🤖 Bot ishga tushdi');
+
+// Error handlerlar
+bot.on('polling_error', (error) => {
+    console.error('Polling error:', error.message);
+});
+
+bot.on('webhook_error', (error) => {
+    console.error('Webhook error:', error.message);
+});
