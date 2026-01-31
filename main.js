@@ -4,7 +4,7 @@ const { initAdmin } = require('./admin.js');
 const { DDoSAttack } = require('./ddos.js');
 const { saveUser, getUserBots, getSettings, isPremium, removeBot } = require('./database.js');
 
-const bot = new TelegramBot('6513975219:AAGYkY2pFPGyttgOKKWaCLrGwL43aT6IbHw', { 
+const bot = new TelegramBot('8362458059:AAFW9YaKexmKqieZMlv8XPdWqHFS2sqM_AA', { 
     polling: true,
     request: { timeout: 30000 }
 });
