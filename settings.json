@@ -1,0 +1,7 @@
+{
+  "settings": {
+    "premiumPrice": 5000,
+    "premiumLimit": 10,
+    "regularLimit": 2
+  }
+}
