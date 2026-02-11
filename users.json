@@ -2,11 +2,11 @@
   "1179710266": {
     "firstName": "Nodiraxon",
     "username": "",
-    "lastSeen": 1770711031554,
+    "lastSeen": 1770778175948,
     "premium": true,
-    "lastBotAdded": "2026-02-10T08:04:29.218Z",
-    "updatedAt": "2026-02-10T08:10:31.563Z",
-    "totalBots": 1
+    "lastBotAdded": "2026-02-10T10:30:07.475Z",
+    "updatedAt": "2026-02-11T02:49:35.955Z",
+    "totalBots": 2
   },
   "users": {
     "1179710266": {
@@ -14,5 +14,29 @@
       "username": "",
       "lastSeen": 1770707225142
     }
+  },
+  "6377954231": {
+    "id": "6377954231",
+    "createdAt": "2026-02-11T02:50:19.328Z",
+    "firstName": "□Alone□",
+    "username": "BAX4566",
+    "lastSeen": 1770778219347,
+    "updatedAt": "2026-02-11T02:50:19.349Z"
+  },
+  "7037927897": {
+    "id": "7037927897",
+    "createdAt": "2026-02-11T02:50:19.356Z",
+    "firstName": "BAX",
+    "username": "BAX4577",
+    "lastSeen": 1770778219508,
+    "updatedAt": "2026-02-11T02:50:19.510Z"
+  },
+  "5653327350": {
+    "id": "5653327350",
+    "createdAt": "2026-02-11T02:50:19.446Z",
+    "firstName": "M🌹",
+    "username": "M123_201",
+    "lastSeen": 1770778219472,
+    "updatedAt": "2026-02-11T02:50:19.475Z"
   }
 }

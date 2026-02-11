@@ -49,7 +49,7 @@ const KB = {
   versions: {
     resize_keyboard: true,
     keyboard: [
-      ['Auto', '1.21.50'],
+      ['1.21.130', '1.21.50'],
       ['1.20.80', '1.19.80'],
       ['🚫 Bekor qilish']
     ]
