@@ -34,7 +34,7 @@ async function resolveDNS(hostname) {
 }
 
 /* ===============================
-   🚀 BOT YARATISH (TUZATILGAN)
+   🚀 BOT YARATISH (SODDA VERSIYA)
 ================================ */
 async function createMinecraftBot({ ip, port, version, userId }) {
   const userIdStr = userId.toString();
@@ -88,19 +88,12 @@ async function createMinecraftBot({ ip, port, version, userId }) {
       socket.on('close', async () => {
         // 2. Minecraft bot yaratish
         try {
-          // VERSIYA TUZATISH: Agar eski versiya tanlangan bo'lsa, 1.21.130 ga o'zgartiramiz
-          let actualVersion = version;
-          if (['1.21.50', '1.20.80', '1.19.80'].includes(version)) {
-            console.log(`⚠️ Versiya ${version} -> 1.21.130 ga o'zgartirildi`);
-            actualVersion = '1.21.130';
-          }
-
           const client = bedrock.createClient({
             host: host,
             port: serverPort,
             username: botName,
             offline: true,
-            version: actualVersion,  // ⬅️ TUZATILDI
+            version: version,
             authTitle: id => id,
             skipPing: false,
             connectTimeout: 10000
@@ -123,7 +116,7 @@ async function createMinecraftBot({ ip, port, version, userId }) {
               ip: host,
               port: serverPort,
               server: `${host}:${serverPort}`,
-              version: actualVersion,  // ⬅️ TUZATILDI
+              version: version,
               status: 'online',
               connectedAt: new Date().toISOString()
             });
@@ -137,7 +130,7 @@ async function createMinecraftBot({ ip, port, version, userId }) {
               success: true,
               botId: botId,
               botName: botName,
-              message: `✅ Bot qo'shildi!\n\n🤖 ${botName}\n🌐 ${host}:${serverPort}\n📦 ${actualVersion}\n🟢 Holat: Online`
+              message: `✅ Bot qo'shildi!\n\n🤖 ${botName}\n🌐 ${host}:${serverPort}\n📦 ${version}\n🟢 Holat: Online`
             });
           });
 
@@ -173,7 +166,7 @@ async function createMinecraftBot({ ip, port, version, userId }) {
 }
 
 /* ===============================
-   ⛔ BOTNI TO'XTATISH (24/7 TURISH UCHUN)
+   ⛔ BOTNI TO'XTATISH
 ================================ */
 async function stopBot(botId, userId = null) {
   if (userId && !isPremium(userId.toString())) {
