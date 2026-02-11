@@ -1,0 +1,261 @@
+const bedrock = require('bedrock-protocol');
+const dns = require('dns');
+const net = require('net');
+const path = require('path');
+const fs = require('fs');
+
+const {
+  addBot,
+  getUserBots,
+  getSettings,
+  isPremium,
+  removeBot,
+  saveUser,
+  isBanned
+} = require('./database.js');
+
+/* ===============================
+   🌍 GLOBAL STATE
+================================ */
+global.mcActiveConnections = global.mcActiveConnections || new Map();
+const activeConnections = global.mcActiveConnections;
+
+/* ===============================
+   🔍 DNS RESOLVE
+================================ */
+async function resolveDNS(hostname) {
+  if (net.isIP(hostname)) return hostname;
+  try {
+    const res = await dns.promises.resolve4(hostname);
+    return res[0];
+  } catch {
+    return hostname;
+  }
+}
+
+/* ===============================
+   🚀 BOT YARATISH (TUZATILGAN)
+================================ */
+async function createMinecraftBot({ ip, port, version, userId }) {
+  const userIdStr = userId.toString();
+
+  // 🚫 BAN TEKSHIRISH
+  if (isBanned(userIdStr)) {
+    throw new Error('🚫 Siz ban qilingansiz');
+  }
+
+  // 🔢 LIMITLAR TEKSHIRISH
+  const userBots = getUserBots(userIdStr);
+  const premium = isPremium(userIdStr);
+  const limit = premium ? 5 : 1;
+
+  if (userBots.length >= limit) {
+    throw new Error(premium
+      ? `❌ Premium limit: ${userBots.length}/${limit} ta bot`
+      : `❌ Oddiy limit: 1 ta bot\n💎 Premium bilan 5 ta bo'ladi`
+    );
+  }
+
+  const host = await resolveDNS(ip);
+  const serverPort = parseInt(port) || 19132;
+
+  // Bot nomi
+  const botName = `TG_${userIdStr.slice(-4)}_${Date.now().toString().slice(-4)}`;
+  const botId = `bot_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+  return new Promise((resolve, reject) => {
+    console.log(`🔌 Bot ulanmoqda: ${botName} -> ${host}:${serverPort} (${version})`);
+
+    try {
+      // 1. Serverga ulanishni tekshirish
+      const socket = net.createConnection(serverPort, host, () => {
+        console.log(`✅ Serverga ulandi: ${host}:${serverPort}`);
+        socket.destroy();
+      });
+
+      socket.setTimeout(5000);
+      socket.on('timeout', () => {
+        console.log(`❌ Serverga ulanish vaqti tugadi`);
+        socket.destroy();
+        reject(new Error('❌ Serverga ulanish mumkin emas'));
+      });
+
+      socket.on('error', (err) => {
+        console.log(`❌ Socket xatosi: ${err.message}`);
+        reject(new Error(`❌ Server noto'g'ri yoki o'chiq: ${err.message}`));
+      });
+
+      socket.on('close', async () => {
+        // 2. Minecraft bot yaratish
+        try {
+          // VERSIYA TUZATISH: Agar eski versiya tanlangan bo'lsa, 1.21.130 ga o'zgartiramiz
+          let actualVersion = version;
+          if (['1.21.50', '1.20.80', '1.19.80'].includes(version)) {
+            console.log(`⚠️ Versiya ${version} -> 1.21.130 ga o'zgartirildi`);
+            actualVersion = '1.21.130';
+          }
+
+          const client = bedrock.createClient({
+            host: host,
+            port: serverPort,
+            username: botName,
+            offline: true,
+            version: actualVersion,  // ⬅️ TUZATILDI
+            authTitle: id => id,
+            skipPing: false,
+            connectTimeout: 10000
+          });
+
+          client.botId = botId;
+          client.userId = userIdStr;
+
+          // Connection events
+          client.on('spawn', () => {
+            console.log(`✅ Bot serverga kirdi: ${botName}`);
+
+            activeConnections.set(botId, client);
+
+            // Bazaga saqlash
+            addBot({
+              id: botId,
+              userId: userIdStr,
+              botName: botName,
+              ip: host,
+              port: serverPort,
+              server: `${host}:${serverPort}`,
+              version: actualVersion,  // ⬅️ TUZATILDI
+              status: 'online',
+              connectedAt: new Date().toISOString()
+            });
+
+            saveUser(userIdStr, {
+              lastBotAdded: new Date().toISOString(),
+              totalBots: userBots.length + 1
+            });
+
+            resolve({
+              success: true,
+              botId: botId,
+              botName: botName,
+              message: `✅ Bot qo'shildi!\n\n🤖 ${botName}\n🌐 ${host}:${serverPort}\n📦 ${actualVersion}\n🟢 Holat: Online`
+            });
+          });
+
+          client.on('disconnect', (reason) => {
+            console.log(`🔌 Bot chiqdi: ${botName} (${reason})`);
+            activeConnections.delete(botId);
+          });
+
+          client.on('error', (err) => {
+            console.error(`❌ Bot xatosi ${botName}:`, err.message);
+            reject(new Error(`❌ Bot xatosi: ${err.message}`));
+          });
+
+          // Timeout
+          setTimeout(() => {
+            if (!client.connected) {
+              client.close();
+              reject(new Error('❌ Bot serverga kira olmadi (10s timeout)'));
+            }
+          }, 10000);
+
+        } catch (err) {
+          console.error('❌ Bot yaratishda xato:', err.message);
+          reject(new Error('❌ Bot yaratishda texnik xatolik'));
+        }
+      });
+
+    } catch (err) {
+      console.error('❌ Umumiy xato:', err.message);
+      reject(new Error(`❌ Xato: ${err.message}`));
+    }
+  });
+}
+
+/* ===============================
+   ⛔ BOTNI TO'XTATISH (24/7 TURISH UCHUN)
+================================ */
+async function stopBot(botId, userId = null) {
+  if (userId && !isPremium(userId.toString())) {
+    throw new Error('❌ Oddiy foydalanuvchi botni o\'chira olmaydi');
+  }
+
+  const client = activeConnections.get(botId);
+
+  if (client) {
+    console.log(`🛑 Bot yopilmoqda: ${botId}`);
+
+    // Barcha usullarni ishlatish
+    try {
+      // 1. quit() - eng yaxshi usul
+      if (typeof client.quit === 'function') {
+        client.quit('User disconnect');
+      }
+
+      // 2. close()
+      if (typeof client.close === 'function') {
+        client.close();
+      }
+
+      // 3. Socket destroy
+      if (client.socket && !client.socket.destroyed) {
+        client.socket.destroy();
+      }
+
+      console.log(`✅ Bot yopildi: ${botId}`);
+    } catch (err) {
+      console.error('❌ Botni yopishda xato:', err.message);
+    }
+
+    activeConnections.delete(botId);
+  }
+
+  removeBot(botId);
+
+  return {
+    success: true,
+    message: '✅ Bot to\'xtatildi'
+  };
+}
+
+/* ===============================
+   📊 FUNKSIYALAR
+================================ */
+function getActiveBots() {
+  return Array.from(activeConnections.keys());
+}
+
+function getUserActiveBots(userId) {
+  const userIdStr = userId.toString();
+  return Array.from(activeConnections.entries())
+    .filter(([id, client]) => client.userId === userIdStr)
+    .map(([id]) => id);
+}
+
+async function stopUserBots(userId) {
+  if (!isPremium(userId.toString())) {
+    throw new Error('❌ Bu funksiya faqat Premium foydalanuvchilar uchun');
+  }
+
+  const bots = getUserBots(userId.toString());
+  let stopped = 0;
+
+  for (const bot of bots) {
+    await stopBot(bot.id, userId);
+    stopped++;
+  }
+
+  return {
+    success: true,
+    stoppedCount: stopped,
+    message: `✅ ${stopped} ta bot to'xtatildi`
+  };
+}
+
+module.exports = {
+  createMinecraftBot,
+  stopBot,
+  stopUserBots,
+  getActiveBots,
+  getUserActiveBots
+};
